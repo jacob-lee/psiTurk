@@ -23,6 +23,7 @@ from flask import Flask, render_template, render_template_string, request, \
 from .db import db_session, init_db
 from .models import Participant
 from sqlalchemy import or_, exc
+import sqlalchemy
 
 from .psiturk_statuses import *
 from .psiturk_config import PsiturkConfig
@@ -70,6 +71,29 @@ if 'gunicorn' in os.environ.get('SERVER_SOFTWARE', ''):
 # Set cache timeout to 10 seconds for static files
 app.config.update(SEND_FILE_MAX_AGE_DEFAULT=10)
 app.secret_key = CONFIG.get('Server Parameters', 'secret_key')
+
+
+def check_browser(user_agent_string: str) -> bool:
+    user_agent_obj = user_agents.parse(user_agent_string)
+    browser_ok = True
+    browser_exclude_rule = CONFIG.get('Task Parameters', 'browser_exclude_rule')
+    for rule in browser_exclude_rule.split(','):
+        myrule = rule.strip()
+        if myrule in ["mobile", "tablet", "touchcapable", "pc", "bot"]:
+            if (myrule == "mobile" and user_agent_obj.is_mobile) or\
+               (myrule == "tablet" and user_agent_obj.is_tablet) or\
+               (myrule == "touchcapable" and user_agent_obj.is_touch_capable) or\
+               (myrule == "pc" and user_agent_obj.is_pc) or\
+               (myrule == "bot" and user_agent_obj.is_bot):
+                browser_ok = False
+        elif myrule == "Safari" or myrule == "safari":
+            if "Chrome" in user_agent_string and "Safari" in user_agent_string:
+                pass
+            elif "Safari" in user_agent_string:
+                browser_ok = False
+        elif myrule in user_agent_string:
+            browser_ok = False
+    return browser_ok
 
 
 def check_templates_exist():
@@ -300,6 +324,95 @@ def check_worker_status():
 @app.route('/pub', methods=['GET'])
 @nocache
 def advertisement():
+    if not check_browser(request.user_agent.string):
+        raise ExperimentError('browser_type_not_allowed')
+
+    if not all(k in request.args for k in ['hitId', 'assignmentId', 'mode']):
+        raise ExperimentError('ad_args_not_set')
+
+    hit_id = request.args['hitId']
+    assignment_id = request.args['assignmentId']
+    mode = request.args['mode']
+    worker_id = request.args['worker_id'] if 'worker_id' in request.args else None
+    allow_repeats = CONFIG.getboolean('Task Parameters', 'allow_repeats')
+
+    # Just looking at the ad
+    if assignment_id == 'ASSIGNMENT_ID_NOT_AVAILABLE':
+        return render_template('ad.html', pop_sub_url='')
+
+    # In debug mode we always just show the ad
+    if mode == 'debug':
+        return render_template(
+            'ad.html',
+            pop_sub_url=f'consent?hitId={hit_id}'
+                        f'&assignmentId={assignment_id}'
+                        f'&workerId={worker_id}'
+                        f'&mode={mode}'
+        )
+
+    # Short-circuit attempted repeaters when repeating disallowed
+    if not allow_repeats:
+        try:
+            nrecords = Participant.query. \
+                filter(Participant.assignmentid != assignment_id). \
+                filter(Participant.workerid == worker_id). \
+                count()
+        except sqlalchemy.exc.SQLAlchemyError:
+            app.logger.error('Error counting number records.', exc_info=True)
+            raise ExperimentError('unknown_error')
+        if nrecords > 0:
+            raise ExperimentError('already_did_exp_hit')
+
+    # Anything past this point satisfies all of the following:
+    #   - NOT just-looking
+    #   - NOT debug
+    #   - (allow-repeats OR (NOT allow-repeats AND num-records == 0)
+    try:
+        result = Participant.query.\
+            filter(Participant.assignmentid == assignment_id). \
+            filter(Participant.workerid == worker_id). \
+            filter(Participant.hitid == hit_id). \
+            one_or_none()
+    except (sqlalchemy.exc.SQLAlchemyError,
+            sqlalchemy.orm.exc.MultipleResultsFound):
+        app.logger.error('Combination of assignment_id, worker_id, '
+                         'and hit_id not unique.')
+        raise ExperimentError('hit_assign_appears_in_database_more_than_once')
+
+    if result:
+        if result.status == STARTED or result.status == QUITEARLY:
+            raise ExperimentError('already_started_exp_mturk')
+        elif result.status == COMPLETED or result.status == SUBMITTED:
+            return render_template(
+                'thanks-mturksubmit.html',
+                using_sandbox=(mode == "sandbox"),
+                hitid=hit_id,
+                assignmentid=assignment_id,
+                workerid=worker_id
+            )
+        else:
+            app.logger.error(
+                f'Assignment {assignment_id} exists for hitid '
+                f'{hit_id} and worker {worker_id} but status '
+                f'{result.status} is unexpected for an ad request.')
+            raise ExperimentError('status_incorrectly_set')
+
+    # Just show the damn ad already
+    return render_template(
+        'ad.html',
+        pop_sub_url=f'consent?hitId={hit_id}'
+                    f'&assignmentId={assignment_id}'
+                    f'&workerId={worker_id}'
+                    f'&mode={mode}'
+    )
+
+
+
+
+#@app.route('/ad', methods=['GET'])
+#@app.route('/pub', methods=['GET'])
+#@nocache
+def old_advertisement():
     """
     This is the url we give for the ad for our 'external question'.  The ad has
     to display two different things: This page will be called from within
@@ -312,25 +425,7 @@ def advertisement():
         person in the database and provide a link to the experiment popup.
     """
     user_agent_string = request.user_agent.string
-    user_agent_obj = user_agents.parse(user_agent_string)
-    browser_ok = True
-    browser_exclude_rule = CONFIG.get('Task Parameters', 'browser_exclude_rule')
-    for rule in browser_exclude_rule.split(','):
-        myrule = rule.strip()
-        if myrule in ["mobile", "tablet", "touchcapable", "pc", "bot"]:
-            if (myrule == "mobile" and user_agent_obj.is_mobile) or\
-               (myrule == "tablet" and user_agent_obj.is_tablet) or\
-               (myrule == "touchcapable" and user_agent_obj.is_touch_capable) or\
-               (myrule == "pc" and user_agent_obj.is_pc) or\
-               (myrule == "bot" and user_agent_obj.is_bot):
-                browser_ok = False
-        elif myrule == "Safari" or myrule == "safari":
-            if "Chrome" in user_agent_string and "Safari" in user_agent_string:
-                pass
-            elif "Safari" in user_agent_string:
-                browser_ok = False
-        elif myrule in user_agent_string:
-            browser_ok = False
+    browser_ok = check_browser(user_agent_string)
 
     if not browser_ok:
         # Handler for IE users if IE is not supported.
@@ -338,6 +433,7 @@ def advertisement():
 
     if not ('hitId' in request.args and 'assignmentId' in request.args):
         raise ExperimentError('hit_assign_worker_id_not_set_in_mturk')
+
     hit_id = request.args['hitId']
     assignment_id = request.args['assignmentId']
     mode = request.args['mode']
@@ -404,6 +500,23 @@ def advertisement():
         )
     else:
         raise ExperimentError('status_incorrectly_set')
+
+
+@app.route('/mturk_submission', methods=['GET'])
+@nocache
+def mturk_submission():
+    if not ('hitId' in request.args and 'assignmentId' in request.args):
+        raise ExperimentError('hit_assign_worker_id_not_set_in_mturk')
+    hit_id = request.args['hitId']
+    assignment_id = request.args['assignmentId']
+
+    return render_template(
+        'mturk-submission.html',
+        using_sandbox=(mode == "sandbox"),
+        hitid=hit_id,
+        assignmentid=assignment_id,
+        workerid=worker_id
+    )
 
 
 @app.route('/consent', methods=['GET'])
