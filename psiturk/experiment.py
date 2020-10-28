@@ -333,7 +333,7 @@ def advertisement():
     hit_id = request.args['hitId']
     assignment_id = request.args['assignmentId']
     mode = request.args['mode']
-    worker_id = request.args['worker_id'] if 'worker_id' in request.args else None
+    worker_id = request.args['workerId'] if 'worker_id' in request.args else None
     allow_repeats = CONFIG.getboolean('Task Parameters', 'allow_repeats')
 
     # Just looking at the ad
@@ -367,6 +367,7 @@ def advertisement():
     #   - NOT just-looking
     #   - NOT debug
     #   - (allow-repeats OR (NOT allow-repeats AND num-records == 0)
+
     try:
         result = Participant.query.\
             filter(Participant.assignmentid == assignment_id). \
