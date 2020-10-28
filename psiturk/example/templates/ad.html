@@ -110,7 +110,8 @@
 							    </p>
 							    <script type="text/javascript">
 									function openwindow() {
-							    		popup = window.open('{{ server_location }}/{{ pop_sub_url }}','Popup','toolbar=no,' +
+							    		popup = window.open('{{ server_location }}/{{ pop_sub_url | safe }}','Popup',
+                          'toolbar=no,' +
                           'location=no,status=no,menubar=no,scrollbars=yes,resizable=no,width='+1024+',height='+768+'');
 							  		}
 							    </script>
