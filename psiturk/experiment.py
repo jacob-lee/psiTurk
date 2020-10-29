@@ -325,9 +325,11 @@ def check_worker_status():
 @nocache
 def advertisement():
     if not check_browser(request.user_agent.string):
+        app.logger.warning(f'Browser type not allowed: {request}')
         raise ExperimentError('browser_type_not_allowed')
 
     if not all(k in request.args for k in ['hitId', 'assignmentId', 'mode']):
+        app.logger.error(f'Request args to /ad incomplete: {request.args}')
         raise ExperimentError('ad_args_not_set')
 
     hit_id = request.args['hitId']
