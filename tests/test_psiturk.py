@@ -137,9 +137,22 @@ def test_does_not_die_if_no_custompy(remove_file, psiturk_test_client):
 
 
 def test_insert_mode(psiturk_test_client):
-    with open('templates/ad.html', 'r') as temp_file:
-        ad_string = temp_file.read()
-
+    #with open('templates/ad.html', 'r') as temp_file:
+    #    ad_string = temp_file.read()
+    ad_string = """
+<h1>Thank you for accepting this HIT!</h1>
+<p>By clicking the following URL link, you will be taken to the experiment,
+including complete instructions and an informed consent agreement.
+</p>
+<script type="text/javascript">
+function openwindow() {
+ popup = window.open('{{ server_location }}/consent?hitId={{ hitid }}&assignmentId={{ assignmentid }}&workerId={{ workerid }}','Popup','toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=no,width='+1024+',height='+768+'');
+}
+</script>
+<div class="alert alert-warning">
+  <b>Warning</b>: Please disable pop-up blockers before continuing.
+</div>
+"""
     from psiturk.experiment import insert_mode
     insert_mode(ad_string, 'debug')
 
@@ -166,7 +179,7 @@ class PsiTurkStandardTests(PsiturkUnitTest):
     def test_ad_no_url_vars(self):
         """Test that ad page throws Error #1001 with no url vars."""
         rv = self.app.get('/ad')
-        assert u'<b>Error</b>: 1001' in rv.get_data(as_text=True)
+        assert u'<b>Error</b>: 1005' in rv.get_data(as_text=True)
 
     def test_ad_with_all_urls(self):
         """Test that ad page throws Error #1003 with no url vars."""
@@ -373,7 +386,8 @@ class PsiTurkStandardTests(PsiturkUnitTest):
         # save data with sync PUT
         uniqueid = "%s:%s" % (self.worker_id, self.assignment_id)
         payload = {
-            "condition": 5, "counterbalance": 0,
+            "condition": 5,
+            "counterbalance": 0,
             "assignmentId": self.assignment_id,
             "workerId": self.worker_id,
             "hitId": self.hit_id,
