@@ -739,7 +739,9 @@ def update(uid=None):
     try:
         data = json.loads(user.datastring)
     except Exception as e:
-        raise ExperimentApiError('failed to load json datastring back from database as object! Error was {}: {}'.format(type(e), str(e)))
+        raise ExperimentApiError(
+            'failed to load json datastring back from database as object! '
+            f'Error was {type(e)}: {e}')
 
     trial = data.get("currenttrial", None)
     app.logger.info("saved data for %s (current trial: %s)", uid, trial)
