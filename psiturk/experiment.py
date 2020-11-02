@@ -335,7 +335,7 @@ def advertisement():
     hit_id = request.args['hitId']
     assignment_id = request.args['assignmentId']
     mode = request.args['mode']
-    worker_id = request.args['workerId'] if 'worker_id' in request.args else None
+    worker_id = request.args['workerId'] if 'workerId' in request.args else None
     allow_repeats = CONFIG.getboolean('Task Parameters', 'allow_repeats')
 
     # Just looking at the ad
@@ -378,8 +378,6 @@ def advertisement():
             one_or_none()
     except (sqlalchemy.exc.SQLAlchemyError,
             sqlalchemy.orm.exc.MultipleResultsFound):
-        app.logger.error('Combination of assignment_id, worker_id, '
-                         'and hit_id not unique.')
         raise ExperimentError('hit_assign_appears_in_database_more_than_once')
 
     if result:
@@ -410,118 +408,6 @@ def advertisement():
     )
 
 
-
-
-#@app.route('/ad', methods=['GET'])
-#@app.route('/pub', methods=['GET'])
-#@nocache
-def old_advertisement():
-    """
-    This is the url we give for the ad for our 'external question'.  The ad has
-    to display two different things: This page will be called from within
-    mechanical turk, with url arguments hitId, assignmentId, and workerId.
-    If the worker has not yet accepted the hit:
-        These arguments will have null values, we should just show an ad for
-        the experiment.
-    If the worker has accepted the hit:
-        These arguments will have appropriate values and we should enter the
-        person in the database and provide a link to the experiment popup.
-    """
-    user_agent_string = request.user_agent.string
-    browser_ok = check_browser(user_agent_string)
-
-    if not browser_ok:
-        # Handler for IE users if IE is not supported.
-        raise ExperimentError('browser_type_not_allowed')
-
-    if not ('hitId' in request.args and 'assignmentId' in request.args):
-        raise ExperimentError('hit_assign_worker_id_not_set_in_mturk')
-
-    hit_id = request.args['hitId']
-    assignment_id = request.args['assignmentId']
-    mode = request.args['mode']
-    if hit_id[:5] == "debug":
-        debug_mode = True
-    else:
-        debug_mode = False
-    already_in_db = False
-    if 'workerId' in request.args:
-        worker_id = request.args['workerId']
-        # First check if this workerId has completed the task before (v1).
-        nrecords = Participant.query.\
-            filter(Participant.assignmentid != assignment_id).\
-            filter(Participant.workerid == worker_id).\
-            count()
-
-        if nrecords > 0:  # Already completed task
-            already_in_db = True
-    else:  # If worker has not accepted the hit
-        worker_id = None
-    try:
-        part = Participant.query.\
-            filter(Participant.hitid == hit_id).\
-            filter(Participant.assignmentid == assignment_id).\
-            filter(Participant.workerid == worker_id).\
-            one()
-        status = part.status
-    except exc.SQLAlchemyError:
-        status = None
-
-    allow_repeats = CONFIG.getboolean('Task Parameters', 'allow_repeats')
-    if (status == STARTED or status == QUITEARLY) and not debug_mode:
-        # Once participants have finished the instructions, we do not allow
-        # them to start the task again.
-        raise ExperimentError('already_started_exp_mturk')
-    elif status == COMPLETED or (status == SUBMITTED and not already_in_db):
-        # 'or status == SUBMITTED' because we suspect that sometimes the post
-        # to mturk fails after we've set status to SUBMITTED, so really they
-        # have not successfully submitted. This gives another chance for the
-        # submit to work.
-
-        # They've finished the experiment but haven't successfully submitted the HIT
-        # yet.
-        return render_template(
-            'thanks-mturksubmit.html',
-            using_sandbox=(mode == "sandbox"),
-            hitid=hit_id,
-            assignmentid=assignment_id,
-            workerid=worker_id
-        )
-    elif already_in_db and not (debug_mode or allow_repeats):
-        raise ExperimentError('already_did_exp_hit')
-    elif status == ALLOCATED or not status or debug_mode:
-        # Participant has not yet agreed to the consent. They might not
-        # even have accepted the HIT.
-        with open('templates/ad.html', 'r') as temp_file:
-            ad_string = temp_file.read()
-        ad_string = insert_mode(ad_string, mode)
-        return render_template_string(
-            ad_string,
-            hitid=hit_id,
-            assignmentid=assignment_id,
-            workerid=worker_id
-        )
-    else:
-        raise ExperimentError('status_incorrectly_set')
-
-
-@app.route('/mturk_submission', methods=['GET'])
-@nocache
-def mturk_submission():
-    if not ('hitId' in request.args and 'assignmentId' in request.args):
-        raise ExperimentError('hit_assign_worker_id_not_set_in_mturk')
-    hit_id = request.args['hitId']
-    assignment_id = request.args['assignmentId']
-
-    return render_template(
-        'mturk-submission.html',
-        using_sandbox=(mode == "sandbox"),
-        hitid=hit_id,
-        assignmentid=assignment_id,
-        workerid=worker_id
-    )
-
-
 @app.route('/consent', methods=['GET'])
 @nocache
 def give_consent():
@@ -549,7 +435,52 @@ def give_consent():
 @app.route('/exp', methods=['GET'])
 @nocache
 def start_exp():
-    """ Serves up the experiment applet. """
+    """
+    repeats: allow repeats
+    debug: debug_mode
+    zero: the number of assignments completed by this worker == 0
+    exists: the assignment indexed by the assignmentId already exists
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | repeats | debug | zero | exists | action                        | comment           |
+    +=========+=======+======+========+===============================+===================+
+    | T       | T     | T    | T      |                               | impossible        |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | T       | T     | T    | F      | create new                    | never done before |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | T       | T     | F    | T      | use matching if not completed | because debug     |
+    |         |       |      |        | else throw already_started_exp|                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | T       | T     | F    | F      | create new                    |                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | T       | F     | T    | T      |                               | impossible        |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | T       | F     | T    | F      | create new                    | never done before |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | T       | F     | F    | T      | use matching if not started   |                   |
+    |         |       |      |        | else throw already_started_exp|                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | T       | F     | F    | F      | create new                    |                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | T     | T    | T      |                               | impossible        |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | T     | T    | F      | create new                    | never done before |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | T     | F    | T      | use matching if not completed | because debug     |
+    |         |       |      |        | else throw already_started_exp|                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | T     | F    | F      | create new                    |                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | F     | T    | T      |                               | impossible        |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | F     | T    | F      | create new                    | never done before |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | F     | F    | T      | use matching if not started   |                   |
+    |         |       |      |        | else throw already_started_exp|                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+    | F       | F     | F    | F      | raise 1010                    |                   |
+    +---------+-------+------+--------+-------------------------------+-------------------+
+
+    """
     if not (('hitId' in request.args) and ('assignmentId' in request.args) and
             ('workerId' in request.args) and ('mode' in request.args)):
         raise ExperimentError('hit_assign_worker_id_not_set_in_exp')
@@ -557,104 +488,111 @@ def start_exp():
     assignment_id = request.args['assignmentId']
     worker_id = request.args['workerId']
     mode = request.args['mode']
+    debug_mode = mode == 'debug'
+    allow_repeats = CONFIG.getboolean('Task Parameters', 'allow_repeats')
+    ad_server_location = '/complete'
+    worker_ip = "UNKNOWN" if not request.remote_addr else \
+        request.remote_addr
+    browser = "UNKNOWN" if not request.user_agent.browser else \
+        request.user_agent.browser
+    platform = "UNKNOWN" if not request.user_agent.platform else \
+        request.user_agent.platform
+    language = "UNKNOWN" if not request.accept_languages else \
+        request.accept_languages.best
     app.logger.info("Accessing /exp: %(h)s %(a)s %(w)s " % {
         "h": hit_id,
         "a": assignment_id,
         "w": worker_id
     })
-    if hit_id[:5] == "debug":
-        debug_mode = True
-    else:
-        debug_mode = False
-
-    # Check first to see if this hitId or assignmentId exists.  If so, check to
-    # see if inExp is set
-    allow_repeats = CONFIG.getboolean('Task Parameters', 'allow_repeats')
-    if allow_repeats:
-        matches = Participant.query.\
-            filter(Participant.workerid == worker_id).\
-            filter(Participant.assignmentid == assignment_id).\
-            all()
-    else:
-        matches = Participant.query.\
-            filter(Participant.workerid == worker_id).\
-            all()
-
-    numrecs = len(matches)
-    if numrecs == 0:
-        # Choose condition and counterbalance
+    try:
         subj_cond, subj_counter = get_condition(mode)
+    except Exception:
+        # get_condition may be custom, so we don't now what it will throw.
+        # We should make it contractual.
+        raise ExperimentError('unknown_error')
 
-        worker_ip = "UNKNOWN" if not request.remote_addr else \
-            request.remote_addr
-        browser = "UNKNOWN" if not request.user_agent.browser else \
-            request.user_agent.browser
-        platform = "UNKNOWN" if not request.user_agent.platform else \
-            request.user_agent.platform
-        language = "UNKNOWN" if not request.accept_languages else \
-            request.accept_languages.best
+    participant_attributes = dict(
+        assignmentid=assignment_id,
+        workerid=worker_id,
+        hitid=hit_id,
+        cond=subj_cond,
+        counterbalance=subj_counter,
+        ipaddress=worker_ip,
+        browser=browser,
+        platform=platform,
+        language=language,
+        mode=mode
+    )
+    part = Participant(**participant_attributes)
 
-        # Set condition here and insert into database.
-        participant_attributes = dict(
-            assignmentid=assignment_id,
-            workerid=worker_id,
-            hitid=hit_id,
-            cond=subj_cond,
-            counterbalance=subj_counter,
-            ipaddress=worker_ip,
-            browser=browser,
-            platform=platform,
-            language=language,
-            mode=mode
-        )
-        part = Participant(**participant_attributes)
-        db_session.add(part)
-        db_session.commit()
+    try:
+        all_assignments = Participant.query.with_for_update(). \
+            filter(Participant.workerid == worker_id). \
+            all()
+        this_assignment = [m for m in all_assignments if m.assignmentid == assignment_id]
+        zero_assignments = len(all_assignments) == 0
+        assignment_exists = len(this_assignment) > 0
 
-    else:
-        # A couple possible problems here:
-        # 1: They've already done an assignment, then we should tell them they
-        #    can't do another one
-        # 2: They've already worked on this assignment, and got too far to
-        #    start over.
-        # 3: They're in the database twice for the same assignment, that should
-        #    never happen.
-        # 4: They're returning and all is well.
-        nrecords = 0
-        for record in matches:
-            other_assignment = False
-            if record.assignmentid != assignment_id:
-                other_assignment = True
-            else:
-                nrecords += 1
-        if nrecords <= 1 and not other_assignment:
-            part = matches[0]
-            # In experiment (or later) can't restart at this point
+        # Logic excludes action table rows 1, 5, 9 and 13
+
+        # Covers action table row: 16
+        if not allow_repeats and not debug_mode and \
+                not zero_assignments and not assignment_exists:
+            raise ExperimentError('already_did_exp_hit')
+
+        # Covers action table rows: 2, 4, 6, 8, 10, 12, and 14.
+        insert_new_participant = zero_assignments or \
+            (not assignment_exists and (allow_repeats or debug_mode))
+        if insert_new_participant:
+            try:
+                db_session.add(part)
+                db_session.commit()
+            except sqlalchemy.exc.SQLAlchemyError as err:
+                print('error inserting new participant')
+                print(err)
+                app.logger.error(str(err), exc_info=True)
+                db_session.rollback()
+                raise ExperimentError('unknown_error')  # Maybe something better?
+            return render_template(
+                'exp.html', uniqueId=part.uniqueid,
+                condition=part.cond,
+                counterbalance=part.counterbalance,
+                adServerLoc=ad_server_location,
+                mode=mode,
+                contact_address=CONFIG.get(
+                    'Task Parameters', 'contact_email_on_error'),
+                codeversion=CONFIG.get(
+                    'Task Parameters', 'experiment_code_version')
+            )
+
+        # Covers action table rows 3, 7, 11, 15
+        if not zero_assignments and assignment_exists:
+            part = this_assignment[0]
+            if part.status >= COMPLETED:
+                raise ExperimentError('already_started_exp')
             if part.status >= STARTED and not debug_mode:
                 raise ExperimentError('already_started_exp')
-        else:
-            if nrecords > 1:
-                app.logger.error("Error, hit/assignment appears in database \
-                                 more than once (serious problem)")
-                raise ExperimentError(
-                    'hit_assign_appears_in_database_more_than_once'
-                )
-            if other_assignment:
-                raise ExperimentError('already_did_exp_hit')
-
-    ad_server_location = '/complete'
-
-    return render_template(
-        'exp.html', uniqueId=part.uniqueid,
-        condition=part.cond,
-        counterbalance=part.counterbalance,
-        adServerLoc=ad_server_location,
-        mode=mode,
-        contact_address=CONFIG.get(
-            'Task Parameters', 'contact_email_on_error'),
-        codeversion=CONFIG.get(
-            'Task Parameters', 'experiment_code_version')
-    )
+            return render_template(
+                'exp.html', uniqueId=part.uniqueid,
+                condition=part.cond,
+                counterbalance=part.counterbalance,
+                adServerLoc=ad_server_location,
+                mode=mode,
+                contact_address=CONFIG.get(
+                    'Task Parameters', 'contact_email_on_error'),
+                codeversion=CONFIG.get(
+                    'Task Parameters', 'experiment_code_version')
+            )
+    except ExperimentError as err:
+        # We do this to prevent the handling by the more general Exception
+        raise err
+    except sqlalchemy.exc.SQLAlchemyError as err:
+        app.logger.error(f'A database error has occurred: {err}', exc_info=True)
+        raise ExperimentError('unknown_error')
+    except Exception as err:
+        # This is only here because we need something user friendly to participants
+        app.logger.error(f'A database error has occurred: {err}', exc_info=True)
+        raise ExperimentError('unknown_error')
 
 
 @app.route('/inexp', methods=['POST'])

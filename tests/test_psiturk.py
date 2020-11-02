@@ -373,73 +373,30 @@ class PsiTurkStandardTests(PsiturkUnitTest):
 
     def test_repeat_experiment_fail(self):
         """Test that a participant cannot repeat the experiment."""
+        mode = 'sandbox'
+        worker_id = self.worker_id
+        assignment_id = self.assignment_id
+        uniqueid = "%s:%s" % (worker_id, assignment_id)
+        hit_id = self.hit_id
+
         request = "&".join([
-            "assignmentId=%s" % self.assignment_id,
-            "workerId=%s" % self.worker_id,
-            "hitId=%s" % self.hit_id,
-            "mode=debug"])
+            f"assignmentId={assignment_id}",
+            f"workerId={worker_id}",
+            f"hitId=%s{hit_id}",
+            f"mode={mode}"])
 
         # put the user in the database
         rv = self.app.get("/exp?%s" % request)
         assert rv.status_code == 200
 
         # save data with sync PUT
-        uniqueid = "%s:%s" % (self.worker_id, self.assignment_id)
-        payload = {
-            "condition": 5,
-            "counterbalance": 0,
-            "assignmentId": self.assignment_id,
-            "workerId": self.worker_id,
-            "hitId": self.hit_id,
-            "currenttrial": 2,
-            "bonus": 0,
-            "data": [
-                {
-                    "uniqueid": uniqueid,
-                    "current_trial": 0,
-                    "dateTime": 1564425799481,
-                    "trialdata": {
-                        "phase": "postquestionnaire",
-                        "status": "begin"
-                    }
-                },
-                {
-                    "uniqueid": uniqueid,
-                    "current_trial": 1,
-                    "dateTime": 1564425802158,
-                    "trialdata": {
-                        "phase": "postquestionnaire",
-                        "status": "submit"
-                    }
-                }
-            ],
-            "questiondata": {
-                "engagement": "5",
-                "difficulty": "5"
-            },
-            "eventdata": [
-                {
-                    "eventtype": "initialized",
-                    "value": '',
-                    "timestamp": 1564425799139,
-                    "interval": 0
-                },
-                {
-                    "eventtype": "window_resize",
-                    "value": [933, 708],
-                    "timestamp": 1564425799139,
-                    "interval": 0
-                }
-            ],
-            "useragent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.142 Safari/537.36",
-            "mode": "debug"
-        }
+
         rv = self.app.put('/sync/%s' % uniqueid, json={
             "condition": 5,
             "counterbalance": 0,
-            "assignmentId": self.assignment_id,
-            "workerId": self.worker_id,
-            "hitId": self.hit_id,
+            "assignmentId": assignment_id,
+            "workerId": worker_id,
+            "hitId": hit_id,
             "currenttrial": 2,
             "bonus": 0, "data": [
                 {
@@ -479,23 +436,22 @@ class PsiTurkStandardTests(PsiturkUnitTest):
                 }
             ],
             "useragent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.142 Safari/537.36",
-            "mode": "debug"
+            "mode": mode
         })
         assert rv.status_code == 200
 
         # complete experiment
-        mode = 'debug'
-        rv = self.app.get('/complete?uniqueId=%s&mode=%s' % (uniqueid, mode))
+        rv = self.app.get(f'/complete?uniqueId={uniqueid}&mode={mode}')
         assert rv.status_code == 200
 
         # choose new assignment and hit ids
-        self.assignment_id = fake.md5(raw_output=False)
-        self.hit_id = fake.md5(raw_output=False)
+        new_assignment_id = fake.md5(raw_output=False)
+        new_hit_id = fake.md5(raw_output=False)
         request = "&".join([
-            "assignmentId=%s" % self.assignment_id,
-            "workerId=%s" % self.worker_id,
-            "hitId=%s" % self.hit_id,
-            "mode=debug"])
+            f"assignmentId={new_assignment_id}",
+            f"workerId={worker_id}",
+            f"hitId={new_hit_id}",
+            f"mode={mode}"])
 
         # make sure they are blocked on the ad page
         rv = self.app.get('/ad?%s' % request)
@@ -589,18 +545,23 @@ class PsiTurkStandardTests(PsiturkUnitTest):
 
     def test_repeat_experiment_quit(self):
         """Test that a participant cannot restart the experiment."""
+        assignment_id = self.assignment_id
+        worker_id = self.worker_id
+        hit_id = self.hit_id
+        uniqueid = "%s:%s" % (worker_id, assignment_id)
+        mode = 'sandbox'
         request = "&".join([
-            "assignmentId=%s" % self.assignment_id,
-            "workerId=%s" % self.worker_id,
-            "hitId=%s" % self.hit_id,
-            "mode=debug"])
+            f"assignmentId={assignment_id}",
+            f"workerId={worker_id}",
+            f"hitId={hit_id}",
+            f"mode={mode}"])
 
         # put the user in the database
         rv = self.app.get("/exp?%s" % request)
         assert rv.status_code == 200
 
         # put the in the experiment
-        uniqueid = "%s:%s" % (self.worker_id, self.assignment_id)
+        uniqueid = "%s:%s" % (worker_id, assignment_id)
         rv = self.app.post("/inexp", data=dict(uniqueId=uniqueid))
         assert rv.status_code == 200
 
@@ -631,18 +592,22 @@ class PsiTurkStandardTests(PsiturkUnitTest):
     def test_repeat_experiment_quit_allow_repeats(self):
         """Test that a participant cannot restart the experiment, even when repeats are allowed."""
         self.set_config(u'Task Parameters', u'allow_repeats', u'true')
+        assignment_id = self.assignment_id
+        worker_id = self.worker_id
+        hit_id = self.hit_id
+        uniqueid = "%s:%s" % (worker_id, assignment_id)
+        mode = 'sandbox'
         request = "&".join([
-            "assignmentId=%s" % self.assignment_id,
-            "workerId=%s" % self.worker_id,
-            "hitId=%s" % self.hit_id,
-            "mode=debug"])
+            f"assignmentId={assignment_id}",
+            f"workerId={worker_id}",
+            f"hitId={hit_id}",
+            f"mode={mode}"])
 
         # put the user in the database
         rv = self.app.get("/exp?%s" % request)
         assert rv.status_code == 200
 
         # put the in the experiment
-        uniqueid = "%s:%s" % (self.worker_id, self.assignment_id)
         rv = self.app.post("/inexp", data=dict(uniqueId=uniqueid))
         assert rv.status_code == 200
 
