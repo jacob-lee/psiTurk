@@ -1,16 +1,25 @@
 <!doctype html>
 <html>
-    <head>
-        <title>Returning to Mechanical Turk</title>
-        <script>
-            window.opener.location.reload(true);
-            window.close();
-        </script>
-    </head>
-    <body>
-        <h1>Returning to HIT window.</h1>
-        <p>You are being redirected back to the HIT window, which should refresh.
-        If you do not see the HIT submission form when you return, try refreshing
-        the page.</p>
-    </body>
+<head>
+  <title>Returning to Mechanical Turk</title>
+  <script>
+      try {
+          window.opener.postMessage('completed');
+          window.close();
+      } catch {
+          window.opener.location.reload();
+          $('body').append('<button id="close-popup">Close Popup</button>');
+          $('#close-popup').on('click.closepopup', () => {
+              $('#close-popup').off('click.closepopup');
+              window.close();
+          })
+      }
+  </script>
+</head>
+<body>
+<h1>Returning to HIT window.</h1>
+<p>You are being redirected back to the HIT window, which should refresh.
+  If you do not see the HIT submission form when you return, try refreshing
+  the page.</p>
+</body>
 </html>

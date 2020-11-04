@@ -635,6 +635,166 @@ class PsiTurkStandardTests(PsiturkUnitTest):
         assert rv.status_code == 200
         assert ': 1008' in rv.get_data(as_text=True)
 
+    def test_get_mturk_submit_page_success(self):
+        assignment_id = self.assignment_id
+        worker_id = self.worker_id
+        hit_id = self.hit_id
+        uniqueid = "%s:%s" % (worker_id, assignment_id)
+        mode = 'sandbox'
+        request = "&".join([
+            f"assignmentId={assignment_id}",
+            f"workerId={worker_id}",
+            f"hitId={hit_id}",
+            f"mode={mode}"])
+
+        # put the user in the database
+        rv = self.app.get("/exp?%s" % request)
+        assert rv.status_code == 200
+
+        # save data with sync PUT
+        rv = self.app.put('/sync/%s' % uniqueid, json={
+            "condition": 5,
+            "counterbalance": 0,
+            "assignmentId": assignment_id,
+            "workerId": worker_id,
+            "hitId": hit_id,
+            "currenttrial": 2,
+            "bonus": 0, "data": [
+                {
+                    "uniqueid": uniqueid,
+                    "current_trial": 0,
+                    "dateTime": 1564425799481,
+                    "trialdata": {
+                        "phase": "postquestionnaire",
+                        "status": "begin"
+                    }
+                },
+                {
+                    "uniqueid": uniqueid,
+                    "current_trial": 1,
+                    "dateTime": 1564425802158,
+                    "trialdata": {
+                        "phase": "postquestionnaire",
+                        "status": "submit"
+                    }
+                }
+            ],
+            "questiondata": {
+                "engagement": "5",
+                "difficulty": "5"
+            },
+            "eventdata": [
+                {
+                    "eventtype": "initialized", "value": '',
+                    "timestamp": 1564425799139,
+                    "interval": 0
+                },
+                {
+                    "eventtype": "window_resize",
+                    "value": [933, 708],
+                    "timestamp": 1564425799139,
+                    "interval": 0
+                }
+            ],
+            "useragent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.142 Safari/537.36",
+            "mode": mode
+        })
+        assert rv.status_code == 200
+
+        # complete experiment
+        rv = self.app.get(f'/complete?uniqueId={uniqueid}&mode={mode}')
+        assert rv.status_code == 200
+
+        # get add
+        rv = self.app.get(f'/thanks-mturk-submit?'
+                          f'uniqueId={uniqueid}'
+                          f'&workerId={worker_id}'
+                          f'&assignmentid={assignment_id}'
+                          f'&mode={mode}'
+                          f'&hitId={hit_id}')
+        assert rv.status_code == 200
+        assert rv.get_data(as_text=True)
+
+    def test_get_mturk_submit_page_fail_when_not_finished(self):
+        #self.set_config('Server Parameters', 'loglevel', 0)
+        assignment_id = self.assignment_id
+        worker_id = self.worker_id
+        hit_id = self.hit_id
+        uniqueid = "%s:%s" % (worker_id, assignment_id)
+        mode = 'sandbox'
+        request = "&".join([
+            f"assignmentId={assignment_id}",
+            f"workerId={worker_id}",
+            f"hitId={hit_id}",
+            f"mode={mode}"])
+
+        # put the user in the database
+        rv = self.app.get("/exp?%s" % request)
+        assert rv.status_code == 200
+
+        # save data with sync PUT
+        rv = self.app.put('/sync/%s' % uniqueid, json={
+            "condition": 5,
+            "counterbalance": 0,
+            "assignmentId": assignment_id,
+            "workerId": worker_id,
+            "hitId": hit_id,
+            "currenttrial": 2,
+            "bonus": 0, "data": [
+                {
+                    "uniqueid": uniqueid,
+                    "current_trial": 0,
+                    "dateTime": 1564425799481,
+                    "trialdata": {
+                        "phase": "postquestionnaire",
+                        "status": "begin"
+                    }
+                },
+                {
+                    "uniqueid": uniqueid,
+                    "current_trial": 1,
+                    "dateTime": 1564425802158,
+                    "trialdata": {
+                        "phase": "postquestionnaire",
+                        "status": "submit"
+                    }
+                }
+            ],
+            "questiondata": {
+                "engagement": "5",
+                "difficulty": "5"
+            },
+            "eventdata": [
+                {
+                    "eventtype": "initialized", "value": '',
+                    "timestamp": 1564425799139,
+                    "interval": 0
+                },
+                {
+                    "eventtype": "window_resize",
+                    "value": [933, 708],
+                    "timestamp": 1564425799139,
+                    "interval": 0
+                }
+            ],
+            "useragent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.142 Safari/537.36",
+            "mode": mode
+        })
+        assert rv.status_code == 200
+
+        # get thanks-mturk-submit page
+        query_string = (f'/thanks-mturk-submit'
+                          f'?uniqueId={uniqueid}'
+                          f'&workerId={worker_id}'
+                          f'&assignmentId={assignment_id}'
+                          f'&mode={mode}'
+                          f'&hitId={hit_id}')
+        print(f'query_string = {query_string}')
+        rv = self.app.get(query_string)
+        print(f'rv.status_code = {rv.status_code}')
+        print(rv.get_data(as_text=True))
+        assert ': 1000' in rv.get_data(as_text=True)
+
 
 class BadUserAgent(PsiturkUnitTest):
     """Setup test blocked user agent (iPad/tablets)"""
