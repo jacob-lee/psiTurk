@@ -107,22 +107,21 @@
         including complete instructions and an informed consent agreement.
       </p>
       <script type="text/javascript">
-          function processChildMessage(message) {
-            if (message === 'completed') {
-                window.reload();
-            }
-          }
           function openwindow() {
               popup = window.open('{{ server_location }}/{{ pop_sub_url | safe }}','Popup',
                   'toolbar=no,' +
                   'location=no,status=no,menubar=no,scrollbars=yes,resizable=no,width='+1024+',height='+768+'');
               window.addEventListener('message', function (e) {
-                  console.log(e.origin);
-                  console.log(window.location.origin)
-                  if (e.origin != window.location.origin) {
+                  if (e.origin !== window.location.origin) {
                       return;
                   }
-                  processChildMessage(e.data);
+                  ((message) => {
+                      if (message === 'completed') {
+                          popup.postMessage('completion-confirmed',
+                              window.location.origin);
+                          window.location.reload();
+                      }
+                  })(e.data);
               }, false);
           }
       </script>

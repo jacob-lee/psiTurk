@@ -1,19 +1,39 @@
 <!doctype html>
 <html>
+<script src="/static/lib/jquery-3.4.1.min.js" type="text/javascript"> </script>
 <head>
   <title>Returning to Mechanical Turk</title>
   <script>
-      try {
-          window.opener.postMessage('completed');
-          window.close();
-      } catch {
-          window.opener.location.reload();
-          $('body').append('<button id="close-popup">Close Popup</button>');
-          $('#close-popup').on('click.closepopup', () => {
-              $('#close-popup').off('click.closepopup');
+      $(document).ready(async () => {
+          try {
+              await (async () => {
+                  window.addEventListener('confirm-message', function (e) {
+                      if (e.origin !== window.location.origin) {
+                          return;
+                      }
+                      if (e.data === 'completion-confirmed') {
+                          Promise.resolve('finished')
+                      }
+                  }, false);
+                  window.opener.postMessage('completed');
+              })();
               window.close();
-          })
-      }
+          } catch {
+              // Try this the old way
+              window.opener.location.reload(true);
+              $('body').append(
+                  '<p>Check to see if the Mturk page shows a "Complete HIT" ' +
+                  'button. If not, right-click in the ad area and try to ' +
+                  'reload the frame.</p>' +
+                  '<button id="close-popup">Close Popup</button>');
+
+              $('#close-popup').on('click.closepopup', () => {
+                  $('#close-popup').off('click.closepopup');
+                  window.close();
+              });
+          }
+      });
+
   </script>
 </head>
 <body>

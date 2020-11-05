@@ -320,40 +320,6 @@ def check_worker_status():
         return jsonify(**resp)
 
 
-@app.route('/thanks-mturk-submit', methods=['GET'])
-@nocache
-def get_mturk_submit_page():
-    if not all(k in request.args for k in
-               ['hitId', 'assignmentId', 'workerId', 'mode']):
-        app.logger.error(f'Request args to /mturk-submit: {request.args}')
-        raise ExperimentError('args_not_set')
-    assignment_id = request.args['assignmentId']
-    worker_id = request.args['workerId']
-    hit_id = request.args['hitId']
-    mode = request.args['mode']
-    try:
-        result = Participant.query. \
-            filter(Participant.hitid == hit_id). \
-            filter(Participant.assignmentid == assignment_id). \
-            filter(Participant.workerid == worker_id). \
-            one_or_none()
-    except (sqlalchemy.exc.SQLAlchemyError,
-            sqlalchemy.orm.exc.MultipleResultsFound):
-        raise ExperimentError('hit_assign_appears_in_database_more_than_once')
-    if not result:
-        raise ExperimentError('page_not_found')
-    if result.status == COMPLETED or result.status == SUBMITTED:
-        return render_template(
-            'thanks-mturksubmit.html',
-            using_sandbox=(mode == "sandbox"),
-            hitid=hit_id,
-            assignmentid=assignment_id,
-            workerid=worker_id
-        )
-    else:
-        raise ExperimentError('status_incorrectly_set')
-
-
 @app.route('/ad', methods=['GET'])
 @app.route('/pub', methods=['GET'])
 @nocache
